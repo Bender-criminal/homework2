@@ -12,7 +12,7 @@ public class FileWriter
     @Override
     public void run() {
         logger.info("Started writer thread {}", currentThread().getName());
-
+        //TODO: запись в файл
         logger.info("Finish writer thread {}", currentThread().getName());
     }
 }
