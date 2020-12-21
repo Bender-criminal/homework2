@@ -9,10 +9,8 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Scanner;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
+import java.util.concurrent.*;
+import java.util.stream.Collectors;
 
 import static java.lang.Runtime.getRuntime;
 import static java.nio.charset.Charset.defaultCharset;
@@ -22,13 +20,13 @@ import static org.slf4j.LoggerFactory.getLogger;
 public class FileProcessor {
     private static final Logger logger = getLogger(FileProcessor.class);
     public static final int CHUNK_SIZE = 2 * getRuntime().availableProcessors();
+    private final Exchanger<List<Pair<String, Integer>>> exchanger = new Exchanger<>();
 
     public void process(@Nonnull String processingFileName, @Nonnull String resultFileName) {
         checkFileExists(processingFileName);
 
         final File file = new File(processingFileName);
-        // TODO: NotImplemented: запускаем FileWriter в отдельном потоке
-        Thread writerThread = startWriterThread();
+        Thread writerThread = startWriterThread(new File(resultFileName));
 
         ExecutorService executorService = Executors.newFixedThreadPool(CHUNK_SIZE);
 
@@ -46,24 +44,15 @@ public class FileProcessor {
                 }
                 if (bufferIsFull(futures.size()) || eof) {
 
-                    // TODO: NotImplemented: добавить обработанные данные в результирующий файл
-                    for (Future<Pair<String, Integer>> future : futures) {
-                        Pair<String, Integer> pair = future.get();
-                        System.out.println(pair.getKey() + ' ' + pair.getValue());
-                    }
+                    exchanger.exchange(getResults(futures));
                     futures.clear();
                 }
             }
 
 
 
-        } catch (IOException exception) {
+        } catch (IOException | InterruptedException exception) {
             logger.error("", exception);
-        } catch (InterruptedException e) {
-            logger.error("", e);
-        } catch (ExecutionException e) {
-            logger.error("", e);
-
         }
 
         writerThread.interrupt();
@@ -72,8 +61,8 @@ public class FileProcessor {
         logger.info("Finish main thread {}", Thread.currentThread().getName());
     }
 
-    private Thread startWriterThread() {
-         Thread thread = new Thread(new FileWriter());
+    private Thread startWriterThread(File resultFile) {
+         Thread thread = new Thread(new FileWriter(resultFile, exchanger));
          thread.start();
          return thread;
     }
@@ -87,5 +76,16 @@ public class FileProcessor {
 
     private boolean bufferIsFull(int count){
         return count >= CHUNK_SIZE;
+    }
+
+    private List<Pair<String, Integer>> getResults(List<Future<Pair<String, Integer>>> futures){
+        return futures.stream().map(pairFuture -> {
+            try {
+                return pairFuture.get();
+            } catch (InterruptedException | ExecutionException e) {
+                logger.error("Не удалось получить результаты вычислений", e);
+            }
+            return null;
+        }).collect(Collectors.toList());
     }
 }
